@@ -44,3 +44,17 @@ class SysfsGPIO(Resource):
     Args:
         index (int): index of target gpio line."""
     index = attr.ib(default=None, validator=attr.validators.instance_of(int))
+
+
+@target_factory.reg_resource
+@attr.s(eq=False)
+class MetaInfo(Resource):
+    """The meta information of the device
+
+    Args:
+        dev_name (str): full name of the device
+        location (str): host location to which the device is attached
+        pid (str): name of the programmer cable"""
+    pid = attr.ib(default=None)
+    location = attr.ib(default=None)
+    dev_name = attr.ib(default=None)
