@@ -15,6 +15,7 @@ import warnings
 from pathlib import Path
 from typing import Dict, Type
 from socket import gethostname, getfqdn
+import time
 
 import attr
 import grpc
@@ -810,6 +811,29 @@ class Exporter:
 
         self.groups = {}
 
+    async def refresh_resource(self) -> None:
+        config_template_env = {
+            "env": os.environ,
+            "isolated": self.isolated,
+            "hostname": self.hostname,
+            "name": self.name,
+        }
+        resource_config = ResourceConfig(self.config["resources"], config_template_env)
+        for group_name, group in resource_config.data.items():
+            if group_name in self.groups.keys():
+                continue
+            group_name = str(group_name)
+            for resource_name, params in group.items():
+                resource_name = str(resource_name)
+                if resource_name == "location":
+                    continue
+                if params is None:
+                    continue
+                cls = params.pop("cls", resource_name)
+
+                # this may call back to acquire the resource immediately
+                await self.add_resource(group_name, resource_name, cls, params)
+
     async def run(self) -> None:
         self.pump_task = self.loop.create_task(self.message_pump())
         self.send_started()
@@ -1004,7 +1028,37 @@ class Exporter:
 
 async def amain(config) -> bool:
     exporter = Exporter(config)
-    await exporter.run()
+    exporter_task = asyncio.create_task(exporter.run())
+    config_tracking_task = asyncio.create_task(monitor_file_change(exporter, config['resources']))
+    
+    # Wait for both tasks to complete
+    done, pending = await asyncio.wait([exporter_task, config_tracking_task])
+    
+    for task in done:
+        print(task.result())
+
+
+async def monitor_file_change(exporter, file_path, check_interval=1):
+    """Monitors a file for changes and notifies if the file has been modified."""
+    
+    if not os.path.exists(file_path):
+        logging.error(f"File {file_path} does not exist.")
+        return
+    
+    # Get the initial modification time
+    last_mtime = os.path.getmtime(file_path)
+    
+    while True:
+        # Check if the file has been modified
+        current_mtime = os.path.getmtime(file_path)
+        if current_mtime != last_mtime:
+            logging.info(f"File {file_path} has been modified at {time.ctime(current_mtime)}")
+            last_mtime = current_mtime  # Update the last modification time
+            # Register resources again
+            await exporter.refresh_resource()
+        
+        # Sleep for a while before checking again
+        await asyncio.sleep(check_interval)
 
 
 def main():
@@ -1065,7 +1119,7 @@ def main():
     asyncio.set_event_loop(loop)
 
     asyncio.run(amain(config), debug=bool(args.debug))
-
+    
     if reexec:
         exit(100)
 
