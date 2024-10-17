@@ -819,20 +819,34 @@ class Exporter:
             "name": self.name,
         }
         resource_config = ResourceConfig(self.config["resources"], config_template_env)
-        for group_name, group in resource_config.data.items():
-            if group_name in self.groups.keys():
-                continue
-            group_name = str(group_name)
-            for resource_name, params in group.items():
-                resource_name = str(resource_name)
-                if resource_name == "location":
-                    continue
-                if params is None:
-                    continue
-                cls = params.pop("cls", resource_name)
+        if len(self.groups) > len(resource_config.data):
+            # Find elements that are only in self.groups and not in resource_config.data
+            resources_to_be_deleted = {key: self.groups[key] for key in self.groups if key not in resource_config.data}
+            logging.info(f"The following device(s) removed from {self.config['resources']}:")
 
-                # this may call back to acquire the resource immediately
-                await self.add_resource(group_name, resource_name, cls, params)
+            for group_name, group in resources_to_be_deleted.items():
+                group_name = str(group_name)
+                for resource_name, params in group.items():
+                    resource_name = str(resource_name)
+                    await self.del_resource(group_name, resource_name)
+
+                # remove the resources from the group from self.groups
+                del self.groups[group_name]
+        else:
+            for group_name, group in resource_config.data.items():
+                if group_name in self.groups.keys():
+                    continue
+                group_name = str(group_name)
+                for resource_name, params in group.items():
+                    resource_name = str(resource_name)
+                    if resource_name == "location":
+                        continue
+                    if params is None:
+                        continue
+                    cls = params.pop("cls", resource_name)
+
+                    # this may call back to acquire the resource immediately
+                    await self.add_resource(group_name, resource_name, cls, params)
 
     async def run(self) -> None:
         self.pump_task = self.loop.create_task(self.message_pump())
@@ -993,6 +1007,15 @@ class Exporter:
             except Exception:  # pylint: disable=broad-except
                 traceback.print_exc(file=sys.stderr)
 
+    async def del_resource(self, group_name, resource_name):
+        """Update status on the coordinator on resource deletion"""
+        print(f"delete resource {group_name}/{resource_name}")
+        msg = labgrid_coordinator_pb2.ExporterInMessage()
+        msg.resource.path.group_name = group_name
+        msg.resource.path.resource_name = resource_name
+        self.out_queue.put_nowait(msg)
+        logging.info("queued update for deleting resource %s/%s", group_name, resource_name)
+
     async def add_resource(self, group_name, resource_name, cls, params):
         """Add a resource to the exporter and update status on the coordinator"""
         print(f"add resource {group_name}/{resource_name}: {cls}/{params}")
@@ -1016,7 +1039,7 @@ class Exporter:
         await self.update_resource(group_name, resource_name)
 
     async def update_resource(self, group_name, resource_name):
-        """Update status on the coordinator"""
+        """Update status on the coordinator on resource update"""
         resource = self.groups[group_name][resource_name]
         msg = labgrid_coordinator_pb2.ExporterInMessage()
         msg.resource.CopyFrom(resource.as_pb2())
