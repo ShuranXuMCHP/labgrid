@@ -773,6 +773,26 @@ class YKUSHPowerPortExport(ResourceExport):
 exports["YKUSHPowerPort"] = YKUSHPowerPortExport
 
 
+def is_dict_complete(data_dict):
+    """
+    Recursively check if the dictionary is complete, meaning it contains no None or empty values.
+    If nested dictionaries are present, they are checked as well.
+    
+    :param data_dict: Dictionary to check for completeness.
+    :return: True if the dictionary is complete, False otherwise.
+    """
+    for key, value in data_dict.items():
+        if isinstance(value, dict):
+            # If value is a nested dictionary, check it recursively
+            if not is_dict_complete(value):
+                return False
+        else:
+            if value is None or value == "":
+                print(f"Key '{key}' has an invalid value (None or empty)")
+                return False
+    return True
+
+
 class Exporter:
     def __init__(self, config) -> None:
         """Set up internal datastructures on successful connection:
@@ -819,6 +839,12 @@ class Exporter:
             "name": self.name,
         }
         resource_config = ResourceConfig(self.config["resources"], config_template_env)
+        # Check if the parsed resources are incomplete
+        for resource, values in resource_config.data.items():
+            if not is_dict_complete(values):
+                logging.error(f"field(s) for {resource} are incomplete.")
+                return
+
         if len(self.groups) > len(resource_config.data):
             # Find elements that are only in self.groups and not in resource_config.data
             resources_to_be_deleted = {key: self.groups[key] for key in self.groups if key not in resource_config.data}
@@ -834,8 +860,6 @@ class Exporter:
                 del self.groups[group_name]
         else:
             for group_name, group in resource_config.data.items():
-                if group_name in self.groups.keys():
-                    continue
                 group_name = str(group_name)
                 for resource_name, params in group.items():
                     resource_name = str(resource_name)
@@ -1009,7 +1033,7 @@ class Exporter:
 
     async def del_resource(self, group_name, resource_name):
         """Update status on the coordinator on resource deletion"""
-        print(f"delete resource {group_name}/{resource_name}")
+        logging.info(f"delete resource {group_name}/{resource_name}")
         msg = labgrid_coordinator_pb2.ExporterInMessage()
         msg.resource.path.group_name = group_name
         msg.resource.path.resource_name = resource_name
@@ -1018,9 +1042,9 @@ class Exporter:
 
     async def add_resource(self, group_name, resource_name, cls, params):
         """Add a resource to the exporter and update status on the coordinator"""
-        print(f"add resource {group_name}/{resource_name}: {cls}/{params}")
+        logging.info(f"add resource {group_name}/{resource_name}: {cls}/{params}")
         group = self.groups.setdefault(group_name, {})
-        assert resource_name not in group
+        # We don't check if resource_name is in group because we allow the existing resources to be updated
         export_cls = exports.get(cls, ResourceEntry)
         config = {
             "avail": export_cls is ResourceEntry,
