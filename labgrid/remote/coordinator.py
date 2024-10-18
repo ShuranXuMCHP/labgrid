@@ -58,7 +58,7 @@ class ExporterSession(RemoteSession):
         old: ResourceImport = group.get(resourcename)
         # We only add a resource if its params and extra fields are not None. A resource with both params and
         # extra represent a real resource exposed from a device
-        if resource.params and resource.extra:
+        if resource is not None and resource.params and resource.extra:
             new = ResourceImport(
                 data=ResourceImport.data_from_pb2(resource), path=(self.name, groupname, resource.cls, resourcename)
             )

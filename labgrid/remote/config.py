@@ -15,10 +15,12 @@ class ResourceConfig:
     template_env = attr.ib(default=attr.Factory(dict), validator=attr.validators.instance_of(dict))
 
     def __attrs_post_init__(self):
+        # Change the control statement prefix from '#' to '%%'
+        # Change the comment prefix from '##' to '#'
         env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(os.path.dirname(self.filename)),
-            line_statement_prefix="#",
-            line_comment_prefix="##",
+            line_statement_prefix="%%",
+            line_comment_prefix="#",
         )
         try:
             with open(self.filename) as file:
