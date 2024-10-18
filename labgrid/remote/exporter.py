@@ -844,33 +844,30 @@ class Exporter:
             if not is_dict_complete(values):
                 logging.error(f"field(s) for {resource} are incomplete.")
                 return
-
-        if len(self.groups) > len(resource_config.data):
-            # Find elements that are only in self.groups and not in resource_config.data
-            resources_to_be_deleted = {key: self.groups[key] for key in self.groups if key not in resource_config.data}
-            logging.info(f"The following device(s) removed from {self.config['resources']}:")
-
-            for group_name, group in resources_to_be_deleted.items():
+        
+        # Remove all devices first
+        for group_name, group in self.groups.items():
                 group_name = str(group_name)
                 for resource_name, params in group.items():
                     resource_name = str(resource_name)
                     await self.del_resource(group_name, resource_name)
+                
+        self.groups.clear()
 
-                # remove the resources from the group from self.groups
-                del self.groups[group_name]
-        else:
-            for group_name, group in resource_config.data.items():
-                group_name = str(group_name)
-                for resource_name, params in group.items():
-                    resource_name = str(resource_name)
-                    if resource_name == "location":
-                        continue
-                    if params is None:
-                        continue
-                    cls = params.pop("cls", resource_name)
+        # Add all devices in the current YAML file
+        for group_name, group in resource_config.data.items():
+            group_name = str(group_name)
+            for resource_name, params in group.items():
+                resource_name = str(resource_name)
+                print(f"resource name = {resource_name}")
+                if resource_name == "location":
+                    continue
+                if params is None:
+                    continue
+                cls = params.pop("cls", resource_name)
 
-                    # this may call back to acquire the resource immediately
-                    await self.add_resource(group_name, resource_name, cls, params)
+                # this may call back to acquire the resource immediately
+                await self.add_resource(group_name, resource_name, cls, params)
 
     async def run(self) -> None:
         self.pump_task = self.loop.create_task(self.message_pump())

@@ -27,9 +27,10 @@ from ..util import atomic_replace, labgrid_version, yaml
 
 
 class Action(Enum):
-    ADD = 0
-    DEL = 1
-    UPD = 2
+    IDLE = 0
+    ADD = 1
+    DEL = 2
+    UPD = 3
 
 
 @attr.s(init=False, eq=False)
@@ -55,7 +56,9 @@ class ExporterSession(RemoteSession):
         logging.info("set_resource %s %s %s", groupname, resourcename, resource)
         group = self.groups.setdefault(groupname, {})
         old: ResourceImport = group.get(resourcename)
-        if resource is not None:
+        # We only add a resource if its params and extra fields are not None. A resource with both params and
+        # extra represent a real resource exposed from a device
+        if resource.params and resource.extra:
             new = ResourceImport(
                 data=ResourceImport.data_from_pb2(resource), path=(self.name, groupname, resource.cls, resourcename)
             )
@@ -65,6 +68,10 @@ class ExporterSession(RemoteSession):
             else:
                 group[resourcename] = new
         else:
+            # the case where old is None is possible when a add-resource request for a incomplete resource 
+            # is issued from the exporter. In this case, we simply return IDLE action
+            if not old:
+                return Action.IDLE, None
             new = None
             if old.acquired:
                 old.orphaned = True
@@ -80,10 +87,12 @@ class ExporterSession(RemoteSession):
             update.resource.path.exporter_name = self.name
             update.resource.path.group_name = groupname
             update.resource.path.resource_name = resourcename
+            logging.debug(f"Updating {groupname}/{resourcename} from {self.name}")
         else:
             update.del_resource.exporter_name = self.name
             update.del_resource.group_name = groupname
             update.del_resource.resource_name = resourcename
+            logging.debug(f"Removing {groupname}/{resourcename} from {self.name}")
 
         for client in self.coordinator.clients.values():
             client.queue.put_nowait(msg)
